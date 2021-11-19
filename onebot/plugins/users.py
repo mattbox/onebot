@@ -33,49 +33,46 @@ class User(object):
             for c in iter(channels):
                 self.channels.add(c)
         except TypeError:
-            raise ValueError("You need to specify in which channel this "
-                             "user is!")
+            raise ValueError("You need to specify in which channel this " "user is!")
 
     @property
     def mask(self):
         """Get the mask of this user"""
-        return IrcString('{}!{}'.format(self.nick, self.host))
+        return IrcString("{}!{}".format(self.nick, self.host))
 
     def set_settings(self, settings):
         """Replaces the settings with the provided dictionary"""
 
-        @asyncio.coroutine
-        def wrapper():
-            id_ = yield from self.id()
+        async def wrapper():
+            id_ = await self.id()
             self.database[id_] = settings
-        asyncio.async(wrapper())
+
+        asyncio.ensure_future(wrapper())
 
     def set_setting(self, setting, value):
         """Set a specified setting to a value"""
         print("Trying to set %s to %s" % (setting, value))
 
-        @asyncio.coroutine
-        def wrapper():
-            id_ = yield from self.id()
+        async def wrapper():
+            id_ = await self.id()
             self.database.set(id_, **{setting: value})
-        asyncio.async(wrapper())
 
-    @asyncio.coroutine
-    def get_settings(self):
+        asyncio.ensure_future(wrapper())
+
+    async def get_settings(self):
         """Get this users settings"""
-        id_ = yield from self.id()
+        id_ = await self.id()
         return self.database.get(id_, dict())
 
-    @asyncio.coroutine
-    def get_setting(self, setting, default=None):
+    async def get_setting(self, setting, default=None):
         """Gets a setting for the users"""
-        settings = yield from self.get_settings()
+        settings = await self.get_settings()
         result = settings.get(setting, default)
         if isinstance(result, str):
             try:
                 parsed = ast.literal_eval(result)
                 return parsed
-            except:
+            except (ValueError, SyntaxError):
                 pass
 
         return result
@@ -116,16 +113,13 @@ class UsersPlugin(object):
         - ``nickserv``: Parse nickserv info from ``WHOIS``.
     """
 
-    requires = [
-        'irc3.plugins.storage',
-        'irc3.plugins.async'
-    ]
+    requires = ["irc3.plugins.storage", "irc3.plugins.asynchronious"]
 
     def __init__(self, bot):
         """Initialises the plugin"""
         self.bot = bot
         config = bot.config.get(__name__, {})
-        self.identifying_method = config.get('identify_by', 'mask')
+        self.identifying_method = config.get("identify_by", "mask")
         self.log = bot.log.getChild(__name__)
         self.connection_lost()
 
@@ -138,7 +132,7 @@ class UsersPlugin(object):
 
     @irc3.event(irc3.rfc.JOIN_PART_QUIT)
     def on_join_part_quit(self, mask=None, **kwargs):
-        event = kwargs['event']
+        event = kwargs["event"]
         self.log.debug("%s %sed", mask.nick, event.lower())
         getattr(self, event.lower())(mask.nick, mask, **kwargs)
 
@@ -153,8 +147,8 @@ class UsersPlugin(object):
         if nick.nick in self.active_users:
             user = self.active_users[nick.nick]
             user.nick = new_nick
-            self.active_users[new_nick] = user
             del self.active_users[nick.nick]
+            self.active_users[new_nick] = user
 
     @irc3.event(irc3.rfc.PRIVMSG)
     def on_privmsg(self, mask=None, event=None, target=None, data=None):
@@ -171,18 +165,18 @@ class UsersPlugin(object):
         self.active_users = dict()
 
     def join(self, nick, mask, channel=None, **kwargs):
-        self.log.debug('%s joined channel %s', nick, channel)
+        self.log.debug("%s joined channel %s", nick, channel)
         # This can only be observed if we're in that channel
         self.channels.add(channel)
         if nick == self.bot.nick:
-            self.bot.send('WHO {}'.format(channel))
+            self.bot.send("WHO {}".format(channel))
 
         if nick not in self.active_users:
             self.active_users[nick] = self.create_user(mask, [channel])
 
         self.active_users[nick].join(channel)
 
-    def quit(self, nick, mask, **kwargs):
+    def quit(self, nick, _mask, **kwargs):
         if nick == self.bot.nick:
             self.connection_lost()
 
@@ -191,7 +185,7 @@ class UsersPlugin(object):
 
     def part(self, nick, mask, channel=None, **kwargs):
         if nick == self.bot.nick:
-            self.log.info('%s left %s by %s', nick, channel, kwargs['event'])
+            self.log.info("%s left %s by %s", nick, channel, kwargs["event"])
             for (n, user) in self.active_users.copy().items():
                 user.part(channel)
                 if not user.still_in_channels():
@@ -208,58 +202,62 @@ class UsersPlugin(object):
             del self.active_users[nick]
 
     @irc3.event(irc3.rfc.RPL_WHOREPLY)
-    def on_who(self, channel=None, nick=None, username=None, host=None,
-               server=None, **kwargs):
+    def on_who(
+        self, channel=None, nick=None, username=None, host=None, server=None, **kwargs
+    ):
         """Process a WHO reply since it could contain new information.
 
         Should only be processed for channels we are currently in!
         """
         if channel not in self.channels:
             self.log.debug(
-                "Got WHO for channel I'm not in: {chan}".format(chan=channel))
+                "Got WHO for channel I'm not in: {chan}".format(chan=channel)
+            )
             return
 
         self.log.debug("Got WHO for %s: %s (%s)", channel, nick, host)
 
         if nick not in self.active_users:
-            mask = IrcString('{}!{}@{}'.format(nick, username, host))
+            mask = IrcString("{}!{}@{}".format(nick, username, host))
             self.active_users[nick] = self.create_user(mask, [channel])
         else:
             self.active_users[nick].join(channel)
 
     def create_user(self, mask, channels):
         """Return a User object"""
-        if self.identifying_method == 'mask':
-            @asyncio.coroutine
-            def id_func():
+        if self.identifying_method == "mask":
+
+            async def id_func():
                 return mask.host
+
             return User(mask, channels, id_func, self.bot.db)
-        if self.identifying_method == 'nickserv':
-            @asyncio.coroutine
-            def get_account():
+        if self.identifying_method == "nickserv":
+
+            async def get_account():
                 user = self.get_user(mask.nick)
-                if hasattr(user, 'account'):
+                if hasattr(user, "account"):
                     return user.account
-                result = yield from self.bot.async.whois(mask.nick)
-                if result['success'] and 'account' in result:
-                    user.account = str(result['account'])
+                result = await self.bot.async_cmds.whois(mask.nick)
+                if result["success"] and "account" in result:
+                    user.account = str(result["account"])
                     return user.account
                 else:
                     return mask.host
 
-            return User(mask, channels, get_account,
-                        self.bot.db)
-        if self.identifying_method == 'whatcd':
-            @asyncio.coroutine
-            def id_func():
-                match = re.match(r'^\d+@(.*)\.\w+\.what\.cd',
-                                 mask.host.lower())
+            return User(mask, channels, get_account, self.bot.db)
+        if self.identifying_method == "whatcd":
+
+            async def id_func():
+                match = re.match(r"^\d+@(.*)\.\w+\.what\.cd", mask.host.lower())
                 if match:
                     return match.group(1)
                 else:
-                    self.log.debug('Failed to extract what.cd user name'
-                                   'from {mask}'.format(mask=mask))
+                    self.log.debug(
+                        "Failed to extract what.cd user name"
+                        "from {mask}".format(mask=mask)
+                    )
                     return mask.host
+
             return User(mask, channels, id_func, self.bot.db)
         else:  # pragma: no cover
             raise ValueError("A valid identifying method should be configured")
