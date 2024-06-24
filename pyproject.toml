@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "onebot"
-version = "2.0.0"
+version = "2.0.1"
 description = "OneBot is an irc bot based on irc3"
 authors = ["Thom Wiggers <thom@thomwiggers.nl>"]
 readme = "README.rst"
@@ -34,6 +34,7 @@ tekore = "^5"
 dateparser = "^1"
 redis = "^5"
 praw = "^7.7.1"
+yfinance = "^0.2.40"
 
 [tool.poetry.dev-dependencies]
 freezegun = "^1.5.1"
