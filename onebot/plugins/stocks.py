@@ -16,46 +16,69 @@ logger = logging.getLogger(__name__)
 
 
 NOT_FOUND_MSG = "Symbol not found"
+UNSUPPORTED = "unsupported stock"
 
 
 def stocks(symbol):
     """collects and parses stock information"""
     comp = yf.Ticker(symbol)
-    try:
-        price = comp.info["currentPrice"]
-    except KeyError:
-        price = comp.info["open"]
 
-# Return error msg if anything is missing.
-    try:
-        name = comp.info['shortName']
-        symbol = comp.info["symbol"]
-        high = comp.info["dayHigh"]
-        low = comp.info["dayLow"]
-        vol = comp.info["volume"]
-    except KeyError:
+    name = comp.info.get("shortName")
+    symbol = comp.info.get("symbol")
+    if symbol is None:
         return NOT_FOUND_MSG
 
-    diff = price - comp.info["previousClose"]
-    pct = (diff/price) * 100
-    change = f"{diff:.2f}({pct:.1f}%)"
-    vol = _human(vol)
+    qType = comp.info.get("quoteType")
 
-    if diff >= 0:
-        day_change = f"\x033▲ {change}\x03"  # green
+    # Determine quote Type
+    if qType == "EQUITY":
+        price = comp.info.get("currentPrice")
+        init = comp.info.get("previousClose")
+        mod = None
+    elif qType == "MUTUALFUND":
+        price = comp.info.get("previousClose")
+        hist = comp.history(period="1mo")
+        init = hist["Close"][hist.index.min()]
+        mod = " past month"
+    elif qType == "INDEX" or "ETF":
+        price = comp.info.get("ask")
+        init = comp.info.get("previousClose")
+        mod = None
     else:
-        day_change = f"\x034▼ {change}\x03"  # red
+        return UNSUPPORTED
+
+    diff = price - init
+    pct = (diff/price) * 100
+
+    change = f"{diff:.2f}({pct:.1f}%)"
+    if diff > 0:
+        day_change = f"\x033${price:.2f} ▲ {change}\x03"  # green
+    elif diff < 0:
+        day_change = f"\x034${price:.2f} ▼ {change}\x03"  # red
+    else:
+        day_change = change
 
     if symbol == "TSLA":
         symbol = "🚀"
-    msg = f"\x02{name}\x02 ({symbol}) ${price:.2f} {day_change} High:{
-        high:.2f}|Low:{low:.2f}|Vol:{vol}"
 
-    return msg
+    response = f"\x02{name}\x02 (${symbol}) {day_change}"
+    if mod:
+        response += mod
+
+    high = comp.info.get("dayHigh")
+    low = comp.info.get("dayLow")
+    vol = _human(comp.info.get("volume"))
+    if None not in (high, low, vol):
+        movement = f" \x0314[\x03 H:{high:.2f} \x0314|\x03 L:{low:.2f} \x0314|\x03 Vol:{vol} \x0314]\x03"
+        response += movement
+
+    return response
 
 
 def _human(n):
     units = ['', '', 'K', 'M', 'B']
+    if n is None:
+        return None
     sn = len(str(n))
     rm = sn % 3
     unit = sn // 3 + (rm > 0)
