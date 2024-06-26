@@ -56,7 +56,7 @@ def stocks(symbol):
     elif diff < 0:
         day_change = f"\x034${price:.2f} ▼ {change}\x03"  # red
     else:
-        day_change = change
+        day_change = f"{price} {change}"
 
     if symbol == "TSLA":
         symbol = "🚀"
