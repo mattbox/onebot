@@ -9,70 +9,110 @@ This plugin allows to query stocks
 from typing import Self
 from irc3 import plugin, event
 import yfinance as yf
-
-import logging
-
-logger = logging.getLogger(__name__)
+import re
 
 
 NOT_FOUND_MSG = "Symbol not found"
 UNSUPPORTED = "unsupported stock"
 
 
-def stocks(symbol):
-    """collects and parses stock information"""
-    comp = yf.Ticker(symbol)
+@plugin
+class StocksPlugin(object):
+    """Stocks Plugin
+    Shows the latest quote when `$<symbol>` is meantioned
+    Quotes pulled from Yahoo Finance
+    """
 
-    name = comp.info.get("shortName")
-    symbol = comp.info.get("symbol")
-    if symbol is None:
-        return NOT_FOUND_MSG
+    requires = ["irc3.plugins.command"]
 
-    qType = comp.info.get("quoteType")
+    def __init__(self, bot):
+        """Initialise the plugin"""
+        self.bot = bot
+        self.log = bot.log.getChild(__name__)
+        self.config = bot.config.get(__name__, {})
 
-    # Determine quote Type
-    if qType == "EQUITY":
-        price = comp.info.get("currentPrice")
-        init = comp.info.get("previousClose")
-        mod = None
-    elif qType == "MUTUALFUND":
-        price = comp.info.get("previousClose")
-        hist = comp.history(period="1mo")
-        init = hist["Close"][hist.index.min()]
-        mod = " past month"
-    elif qType == "INDEX" or "ETF":
-        price = comp.info.get("ask")
-        init = comp.info.get("previousClose")
-        mod = None
-    else:
-        return UNSUPPORTED
+    @event(
+        r"^:(?P<mask>\S+!\S+@\S+) (?P<event>PRIVMSG|NOTICE) "
+        r"(?P<target>#\S+) :(?P<data>.*\$\^?[A-Za-z]+\b)"
+    )
+    async def on_msg(self, mask, event, target, data):
+        """Parses in put and prints"""
+        if (
+            mask.nick == self.bot.nick
+            or not target.is_channel
+        ):
+            return
+        symbols = re.findall(r"\$(\^?[A-Za-z]+\b)", data)
+        for symbol in symbols:
+            message = await self.stocks_response(symbol)
+            self.bot.privmsg(target, message)
 
-    diff = price - init
-    pct = (diff/price) * 100
+    async def stocks_response(self, symbol):
+        """gets stock information"""
+        comp = yf.Ticker(symbol)
 
-    change = f"{diff:.2f}({pct:.1f}%)"
-    if diff > 0:
-        day_change = f"\x033${price:.2f} ▲ {change}\x03"  # green
-    elif diff < 0:
-        day_change = f"\x034${price:.2f} ▼ {change}\x03"  # red
-    else:
-        day_change = f"{price} {change}"
+        name = comp.info.get("shortName")
+        symbol = comp.info.get("symbol")
+        if symbol is None:
+            return NOT_FOUND_MSG
 
-    if symbol == "TSLA":
-        symbol = "🚀"
+        qType = comp.info.get("quoteType")
 
-    response = f"\x02{name}\x02 (${symbol}) {day_change}"
-    if mod:
-        response += mod
+        if qType == "EQUITY":
+            price = comp.info.get("currentPrice")
+            init = comp.info.get("previousClose")
+            open = comp.info.get("open")
+            mod = None
+        elif qType == "MUTUALFUND":
+            price = comp.info.get("previousClose")
+            hist = comp.history(period="1mo")
+            init = hist["Close"][hist.index.min()]
+            open = comp.info.get("open")
+            mod = " past month"
+        elif qType == "INDEX" or "ETF":
+            price = comp.info.get("ask")
+            init = comp.info.get("previousClose")
+            open = comp.info.get("open")
+            mod = None
+        else:
+            return UNSUPPORTED
 
-    high = comp.info.get("dayHigh")
-    low = comp.info.get("dayLow")
-    vol = _human(comp.info.get("volume"))
-    if None not in (high, low, vol):
-        movement = f" \x0314[\x03 H:{high:.2f} \x0314|\x03 L:{low:.2f} \x0314|\x03 Vol:{vol} \x0314]\x03"
+        diff = price - init
+        pct = (diff/price) * 100
+
+        change = f"{diff:.2f} ({pct:.1f}%)"
+        if diff > 0:
+            day_change = f"\x033${price:.2f} ▲ {change}\x03"  # green
+        elif diff < 0:
+            day_change = f"\x034${price:.2f} ▼ {change}\x03"  # red
+        else:
+            day_change = f"{price} {change}"
+
+        if symbol == "TSLA":
+            symbol = "🚀"
+
+        response = f"\x02{name}\x02 (${symbol}) {day_change} "
+        if mod:
+            response += mod
+
+        high = comp.info.get("dayHigh")
+        low = comp.info.get("dayLow")
+        vol = _human(comp.info.get("volume"))
+
+        if None not in (open, high, low, vol):
+            movement = f"\x0314[\x03O:{open:.2f} H:{high:.2f} \x0314|\x03 L:{
+                low:.2f} \x0314|\x03 Vol:{vol}\x0314]\x03"
+        elif None not in (high, low, vol):
+            movement = f"\x0314[\x03H:{high:.2f} \x0314|\x03 L:{
+                low:.2f} \x0314|\x03 Vol:{vol}\x0314]\x03"
+
         response += movement
 
-    return response
+        return response
+
+    @classmethod
+    def reload(cls, old: Self) -> Self:  # pragma: no cover
+        return cls(old.bot)
 
 
 def _human(n):
@@ -84,34 +124,3 @@ def _human(n):
     unit = sn // 3 + (rm > 0)
     val = str(n)[:3] if rm == 0 else str(n)[:rm]
     return f"{val}{units[unit]}"
-
-
-@plugin
-class StocksPlugin(object):
-    """Stocks Plugin"""
-
-    def __init__(self, bot):
-        """Initialise the plugin"""
-        self.bot = bot
-        self.log = bot.log.getChild(__name__)
-        self.config = bot.config.get(__name__, {})
-
-    @event(
-        r"^:(?P<mask>\S+!\S+@\S+) (?P<event>PRIVMSG|NOTICE) "
-        r"(?P<target>#\S+) :.*\$(?P<data>\^?[A-Za-z]+)\b"
-    )
-    def on_msg(self, mask, event, target, data):
-        """Check the value of your stonks."""
-
-        if (
-            mask.nick == self.bot.nick
-            or not target.is_channel
-        ):
-            return
-
-        message = stocks(data)
-        self.bot.privmsg(target, message)
-
-    @classmethod
-    def reload(cls, old: Self) -> Self:  # pragma: no cover
-        return cls(old.bot)

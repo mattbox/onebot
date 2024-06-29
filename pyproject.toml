@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "onebot"
-version = "2.0.1"
+version = "2.0.2"
 description = "OneBot is an irc bot based on irc3"
 authors = ["Thom Wiggers <thom@thomwiggers.nl>"]
 readme = "README.rst"
