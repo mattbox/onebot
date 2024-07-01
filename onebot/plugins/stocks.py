@@ -37,10 +37,7 @@ class StocksPlugin(object):
     )
     async def on_msg(self, mask, event, target, data):
         """Parses in put and prints"""
-        if (
-            mask.nick == self.bot.nick
-            or not target.is_channel
-        ):
+        if mask.nick == self.bot.nick or not target.is_channel:
             return
         symbols = re.findall(r"\$(\^?[A-Za-z]+\b)", data)
         for symbol in symbols:
@@ -78,7 +75,7 @@ class StocksPlugin(object):
             return UNSUPPORTED
 
         diff = price - init
-        pct = (diff/price) * 100
+        pct = (diff / price) * 100
 
         change = f"{diff:.2f} ({pct:.1f}%)"
         if diff > 0:
@@ -116,7 +113,7 @@ class StocksPlugin(object):
 
 
 def _human(n):
-    units = ['', '', 'K', 'M', 'B']
+    units = ["", "", "K", "M", "B"]
     if n is None:
         return None
     sn = len(str(n))
