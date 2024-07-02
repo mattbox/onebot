@@ -54,29 +54,24 @@ class StocksPlugin(object):
             return NOT_FOUND_MSG
 
         qType = comp.info.get("quoteType")
-
         if qType == "EQUITY":
             price = comp.info.get("currentPrice")
             init = comp.info.get("previousClose")
-            open = comp.info.get("open")
             mod = None
         elif qType == "MUTUALFUND":
             price = comp.info.get("previousClose")
             hist = comp.history(period="1mo")
             init = hist["Close"][hist.index.min()]
-            open = comp.info.get("open")
             mod = " past month"
         elif qType == "INDEX" or "ETF":
             price = comp.info.get("ask")
             init = comp.info.get("previousClose")
-            open = comp.info.get("open")
             mod = None
         else:
             return UNSUPPORTED
 
         diff = price - init
         pct = (diff / price) * 100
-
         change = f"{diff:.2f} ({pct:.1f}%)"
         if diff > 0:
             day_change = f"\x033${price:.2f} ▲ {change}\x03"  # green
@@ -95,15 +90,9 @@ class StocksPlugin(object):
         high = comp.info.get("dayHigh")
         low = comp.info.get("dayLow")
         vol = _human(comp.info.get("volume"))
-
-        if None not in (open, high, low, vol):
-            movement = f"\x0314[\x03O:{open:.2f} H:{high:.2f} \x0314|\x03 L:{
-                low:.2f} \x0314|\x03 Vol:{vol}\x0314]\x03"
-        elif None not in (high, low, vol):
-            movement = f"\x0314[\x03H:{high:.2f} \x0314|\x03 L:{
-                low:.2f} \x0314|\x03 Vol:{vol}\x0314]\x03"
-
-        response += movement
+        if None not in (high, low, vol):
+            vola = f"\x0314[\x03H:{high:.2f} \x0314|\x03 L:{low:.2f} \x0314|\x03 Vol:{vol}\x0314]\x03"
+            response += vola 
 
         return response
 
