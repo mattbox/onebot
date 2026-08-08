@@ -54,8 +54,7 @@ class DrinkPlugin(object):
             "baby bottle 🍼",
         ]
 
-        selected = random.choice(beverages)
-        return self.bot.privmsg(target, selected)
+        return random.choice(beverages)
 
     @classmethod
     def reload(cls, old: Self) -> Self:  # pragma: no cover

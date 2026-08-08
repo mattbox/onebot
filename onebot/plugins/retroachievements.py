@@ -125,8 +125,7 @@ class RetroAchievementsPlugin(object):
         """
         game_ids = await self._get_cached_game_ids()
         if not game_ids:
-            self.bot.privmsg(target, "No games cached. Try .racache first.")
-            return
+            return "No games cached. Try .racache first."
 
         game_id = random.choice(game_ids)
         base_url = "https://retroachievements.org/API/API_GetGameExtended.php"
@@ -134,9 +133,8 @@ class RetroAchievementsPlugin(object):
         if game_info and game_info.get("Title"):
             msg = self._format_game_msg(game_info)
             url = f"https://retroachievements.org/game/{game_id}"
-            self.bot.privmsg(target, f"{msg} | {url}")
-        else:
-            self.bot.privmsg(target, "Could not fetch game details. Try again!")
+            return f"{msg} | {url}"
+        return "Could not fetch game details. Try again!"
 
     @command(permission="admin")
     async def racache(self, mask, target, args):
@@ -145,7 +143,7 @@ class RetroAchievementsPlugin(object):
         %%racache
         """
         game_ids = await self._build_game_cache()
-        self.bot.privmsg(target, f"Cached {len(game_ids)} games.")
+        return f"Cached {len(game_ids)} games."
 
     @irc3.event(
         r"^:(?P<mask>\S+!\S+@\S+) (?P<event>(PRIVMSG)) "
