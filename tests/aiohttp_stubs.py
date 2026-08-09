@@ -15,12 +15,16 @@ were made.
 class FakeResponse:
     """A stub for ``aiohttp.ClientResponse``."""
 
-    def __init__(self, status=200, json_data=None):
+    def __init__(self, status=200, json_data=None, text=""):
         self.status = status
         self._json_data = json_data
+        self._text = text
 
-    async def json(self):
+    async def json(self, content_type="application/json"):
         return self._json_data
+
+    async def text(self):
+        return self._text
 
     async def __aenter__(self):
         return self
