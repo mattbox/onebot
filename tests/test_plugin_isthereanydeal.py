@@ -13,7 +13,11 @@ import logging
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from onebot.plugins.isthereanydeal import IsThereAnyDealPlugin, _format_price
+from onebot.plugins.isthereanydeal import (
+    IsThereAnyDealPlugin,
+    _format_price,
+    _redact_key,
+)
 from onebot.testing import BotTestCase
 
 from .aiohttp_stubs import FakeResponse, fake_session
@@ -68,6 +72,51 @@ class FormatPriceTest(unittest.TestCase):
         assert _format_price(1.005, "SEK") == "SEK 1.00"
 
 
+class RedactKeyTest(unittest.TestCase):
+    def test_the_key_is_removed_from_a_url(self):
+        text = "url='https://api.isthereanydeal.com/games/lookup/v1?key=s3cret'"
+        assert _redact_key(text, "s3cret") == (
+            "url='https://api.isthereanydeal.com/games/lookup/v1?key=<redacted>'"
+        )
+
+    def test_a_percent_encoded_key_is_removed_too(self):
+        assert "s3c/ret" not in _redact_key("key=s3c%2Fret", "s3c/ret")
+
+    def test_text_without_the_key_is_untouched(self):
+        assert _redact_key("Cannot connect to host", "s3cret") == (
+            "Cannot connect to host"
+        )
+
+    def test_no_key_configured(self):
+        assert _redact_key("boom", None) == "boom"
+
+
+class KeyIsNotLoggedTest(unittest.TestCase):
+    """aiohttp puts the whole request URL, key included, in its exceptions."""
+
+    def setUp(self):
+        self.plugin = IsThereAnyDealPlugin(StubBot(api_key="s3cret"))
+
+    def _log_from(self, coroutine_factory, response):
+        factory, _ = fake_session(response)
+        with patch("onebot.plugins.isthereanydeal.aiohttp.ClientSession", factory):
+            with self.assertLogs("test.isthereanydeal", level="ERROR") as caught:
+                asyncio.run(coroutine_factory())
+        return "\n".join(caught.output)
+
+    def test_lookup_errors_do_not_leak_the_key(self):
+        boom = OSError("url='https://api.isthereanydeal.com/v1?key=s3cret'")
+        output = self._log_from(lambda: self.plugin._lookup_game("220"), boom)
+        assert "s3cret" not in output
+        assert "<redacted>" in output
+
+    def test_overview_errors_do_not_leak_the_key(self):
+        boom = OSError("url='https://api.isthereanydeal.com/v2?key=s3cret'")
+        output = self._log_from(lambda: self.plugin._get_overview(GAME["id"]), boom)
+        assert "s3cret" not in output
+        assert "<redacted>" in output
+
+
 class PluginConstructionTest(unittest.TestCase):
     def test_requires_an_api_key(self):
         with self.assertRaises(Exception) as ctx:
@@ -102,6 +151,14 @@ class FormatMessageTest(unittest.TestCase):
 
     def test_untracked_game_without_lowest(self):
         assert self.plugin._format_message(GAME, {}) == "Game not tracked"
+
+    def test_untracked_game_that_still_has_price_history(self):
+        """A delisted game keeps its `lowest` while `current` goes null."""
+        overview = _overview()
+        overview["current"] = None
+        assert self.plugin._format_message(GAME, overview) == (
+            "Game not tracked || Historic low: $2.49"
+        )
 
     def test_other_currencies_are_passed_through(self):
         overview = _overview()

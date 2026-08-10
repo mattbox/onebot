@@ -397,8 +397,11 @@ def _parse_clock(value: str, reference: datetime) -> Optional[datetime]:
 def _is_night(now: datetime, astronomy: Dict[str, Any]) -> bool:
     """Is it dark out, according to the day's sunrise and sunset?
 
-    Falls back to a fixed 06:00--20:00 day when the times cannot be parsed
-    (wttr.in returns "No sunrise" inside the polar circles).
+    Falls back to a fixed 06:00--20:00 day whenever the pair says nothing
+    useful, which inside the polar circles is most of the year: wttr.in
+    reports either "No sunrise" or, more often, a sunrise and sunset that are
+    both "12:00 AM". Neither form distinguishes polar day from polar night,
+    so the fixed hours are the least wrong answer available.
 
     >>> astro = {"sunrise": "06:59 AM", "sunset": "08:21 PM"}
     >>> _is_night(datetime(2026, 8, 8, 22, 0), astro)
@@ -407,6 +410,11 @@ def _is_night(now: datetime, astronomy: Dict[str, Any]) -> bool:
     False
     >>> _is_night(datetime(2026, 8, 8, 3, 0), {"sunrise": "No sunrise"})
     True
+    >>> polar = {"sunrise": "12:00 AM", "sunset": "12:00 AM"}
+    >>> _is_night(datetime(2026, 12, 21, 3, 0), polar)
+    True
+    >>> _is_night(datetime(2026, 12, 21, 12, 0), polar)
+    False
 
     Near the midnight sun the sun sets after midnight, which belongs to the
     following day rather than to this morning:
@@ -419,9 +427,9 @@ def _is_night(now: datetime, astronomy: Dict[str, Any]) -> bool:
     """
     sunrise = _parse_clock(astronomy.get("sunrise", ""), now)
     sunset = _parse_clock(astronomy.get("sunset", ""), now)
-    if sunrise is None or sunset is None:
+    if sunrise is None or sunset is None or sunrise == sunset:
         return not 6 <= now.hour < 20
-    if sunset <= sunrise:
+    if sunset < sunrise:
         sunset += timedelta(days=1)
     return now < sunrise or now >= sunset
 

@@ -14,7 +14,7 @@ import logging
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from onebot.plugins.retroachievements import RetroAchievementsPlugin
+from onebot.plugins.retroachievements import RetroAchievementsPlugin, _redact_key
 from onebot.testing import BotTestCase
 
 from .aiohttp_stubs import FakeResponse, fake_session
@@ -89,6 +89,35 @@ class FetchRaDataTest(unittest.TestCase):
     def test_exceptions_are_swallowed(self):
         result, _ = self._run(asyncio.TimeoutError())
         assert result is None
+
+    def test_the_api_key_is_not_logged(self):
+        """aiohttp puts the whole request URL, key included, in its errors."""
+        self.plugin = _plugin(api_key="s3cret")
+        boom = OSError("400, url='{}?i=1&y=s3cret'".format(GAME_EXTENDED))
+        with self.assertLogs("test.retroachievements", level="ERROR") as caught:
+            self._run(boom)
+        output = "\n".join(caught.output)
+        assert "s3cret" not in output
+        assert "<redacted>" in output
+
+
+class RedactKeyTest(unittest.TestCase):
+    def test_the_key_is_removed_from_a_url(self):
+        text = "url='{}?i=1&y=s3cret'".format(GAME_EXTENDED)
+        assert _redact_key(text, "s3cret") == (
+            "url='{}?i=1&y=<redacted>'".format(GAME_EXTENDED)
+        )
+
+    def test_a_percent_encoded_key_is_removed_too(self):
+        assert "s3c/ret" not in _redact_key("y=s3c%2Fret", "s3c/ret")
+
+    def test_text_without_the_key_is_untouched(self):
+        assert _redact_key("Cannot connect to host", "s3cret") == (
+            "Cannot connect to host"
+        )
+
+    def test_no_key_configured(self):
+        assert _redact_key("boom", None) == "boom"
 
 
 class ConsoleAndGameCacheTest(unittest.TestCase):
@@ -345,6 +374,20 @@ class UserUrlEventTest(RetroAchievementsBotTestCase):
             ]
         )
 
+    def test_a_failed_game_lookup_still_posts_the_profile(self):
+        """The second request can time out without taking the reply with it."""
+        user_info = dict(USER_INFO, RichPresenceMsg="Playing Green Hill Zone")
+        self.plugin._fetch_RA_data = AsyncMock(side_effect=[user_info, None])
+        self.dispatch(
+            ":user!user@host PRIVMSG #chan :https://retroachievements.org/user/Scott"
+        )
+        self.assertSent(
+            [
+                "PRIVMSG #chan :\x02Scott\x02 \x030212345\x03 (23456) "
+                "[ Playing Green Hill Zone ]"
+            ]
+        )
+
     def test_unknown_user(self):
         self.plugin._fetch_RA_data = AsyncMock(return_value=None)
         self.dispatch(
@@ -400,6 +443,29 @@ class AchievementUrlEventTest(RetroAchievementsBotTestCase):
             ":user!user@host PRIVMSG #chan :https://retroachievements.org/achievement/9"
         )
         assert "33.33% unlock rate" in self.bot.sent[0]
+
+    def test_a_freshly_published_achievement_has_no_players(self):
+        """Every achievement is published at TotalPlayers: 0."""
+        cheevo = dict(CHEEVO_INFO, UnlocksCount=0, UnlocksHardcoreCount=0)
+        cheevo["TotalPlayers"] = 0
+        self.plugin._fetch_RA_data = AsyncMock(return_value=cheevo)
+        self.dispatch(
+            ":user!user@host PRIVMSG #chan :https://retroachievements.org/achievement/9"
+        )
+        # `sent` resets the underlying mock, so it can only be read once
+        sent = self.bot.sent
+        assert len(sent) == 1
+        assert sent[0].endswith("| \x0302no players yet\x03")
+
+    def test_missing_unlock_counts_do_not_raise(self):
+        cheevo = {"Achievement": {}, "Game": {}}
+        self.plugin._fetch_RA_data = AsyncMock(return_value=cheevo)
+        self.dispatch(
+            ":user!user@host PRIVMSG #chan :https://retroachievements.org/achievement/9"
+        )
+        sent = self.bot.sent
+        assert len(sent) == 1
+        assert "no players yet" in sent[0]
 
     def test_unknown_achievement(self):
         self.plugin._fetch_RA_data = AsyncMock(return_value=None)

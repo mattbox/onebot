@@ -8,11 +8,31 @@ Shows price information from IsThereAnyDeal.com when a Steam store
 URL is posted in chat. Requires an API key from isthereanydeal.com.
 """
 
+from urllib.parse import quote
+
 import aiohttp
 from irc3 import plugin, event
 
 ITAD_API_BASE = "https://api.isthereanydeal.com"
 CURRENCY_SYMBOLS = {"USD": "$", "EUR": "€", "GBP": "£"}
+
+
+def _redact_key(text, key):
+    """Strip an API key out of text bound for the log.
+
+    aiohttp puts the whole request URL in its exception messages, and the key
+    travels there as a query parameter.
+
+    >>> _redact_key("url='https://x/v1?key=s3cret&appid=220'", "s3cret")
+    "url='https://x/v1?key=<redacted>&appid=220'"
+    >>> _redact_key("nothing to hide", None)
+    'nothing to hide'
+    """
+    if not key:
+        return text
+    for form in (key, quote(key, safe="")):
+        text = text.replace(form, "<redacted>")
+    return text
 
 
 def _format_price(amount, currency):
@@ -72,7 +92,9 @@ class IsThereAnyDealPlugin(object):
                         return None
                     return data["game"]
         except Exception as e:
-            self.log.error("Error looking up game %s: %s", appid, e)
+            self.log.error(
+                "Error looking up game %s: %s", appid, _redact_key(str(e), self.api_key)
+            )
             return None
 
     async def _get_overview(self, game_id):
@@ -95,7 +117,11 @@ class IsThereAnyDealPlugin(object):
                     prices = data.get("prices", [])
                     return prices[0] if prices else None
         except Exception as e:
-            self.log.error("Error fetching overview for %s: %s", game_id, e)
+            self.log.error(
+                "Error fetching overview for %s: %s",
+                game_id,
+                _redact_key(str(e), self.api_key),
+            )
             return None
 
     def _format_message(self, game, overview):
@@ -127,7 +153,9 @@ class IsThereAnyDealPlugin(object):
 
         lowest = overview.get("lowest")
         if lowest:
-            if lowest["price"]["amount"] == current["price"]["amount"]:
+            # `current` and `lowest` are independently nullable: a delisted
+            # game keeps its price history but has nothing on sale today
+            if current and lowest["price"]["amount"] == current["price"]["amount"]:
                 parts.append("🔥 All time low 🔥")
                 return " || ".join(parts)
             low_str = _format_price(

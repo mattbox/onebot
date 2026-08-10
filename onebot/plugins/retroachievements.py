@@ -8,6 +8,7 @@
 
 import json
 import random
+from urllib.parse import quote
 
 import aiohttp
 import irc3
@@ -15,6 +16,24 @@ from irc3.plugins.command import command
 
 ASCII_BLU = "\x0302"
 ASCII_YLW = "\x0308"
+
+
+def _redact_key(text, key):
+    """Strip an API key out of text bound for the log.
+
+    aiohttp puts the whole request URL in its exception messages, and the key
+    travels there as the ``y`` query parameter.
+
+    >>> _redact_key("url='https://x/API_X.php?i=1&y=s3cret'", "s3cret")
+    "url='https://x/API_X.php?i=1&y=<redacted>'"
+    >>> _redact_key("nothing to hide", None)
+    'nothing to hide'
+    """
+    if not key:
+        return text
+    for form in (key, quote(key, safe="")):
+        text = text.replace(form, "<redacted>")
+    return text
 
 
 @irc3.plugin
@@ -58,7 +77,10 @@ class RetroAchievementsPlugin(object):
                         return data if data else None
                     return None
         except Exception as e:
-            self.bot.log.error(f"Fatal exception occurred. Aborting: {str(e)}")
+            self.log.error(
+                "Fatal exception occurred. Aborting: %s",
+                _redact_key(str(e), self.api_key),
+            )
             return None
 
     async def _fetch_console_ids(self):
@@ -190,8 +212,12 @@ class RetroAchievementsPlugin(object):
                 gameID = user_info.get("LastGameID")
                 game_url = "https://retroachievements.org/API/API_GetGameExtended.php"
                 game_info = await self._fetch_RA_data(game_url, {"i": gameID})
-                title = game_info.get("Title")
-                msg.append(f"Most Recent Game: {ASCII_YLW}{title}\x03 [ {status} ]")
+                if game_info:
+                    title = game_info.get("Title")
+                    msg.append(f"Most Recent Game: {ASCII_YLW}{title}\x03 [ {status} ]")
+                else:
+                    # The profile is still worth posting without the title
+                    msg.append(f"[ {status} ]")
             self.bot.privmsg(target, "{}".format(" ".join(msg)))
         else:
             self.bot.privmsg(target, "User Not found...")
@@ -219,15 +245,19 @@ class RetroAchievementsPlugin(object):
                 f"({cheevo.get('TrueRatio')}) - {cheevo.get('Description')}"
             ]
 
-            unlocks = cheevo_info.get("UnlocksCount")
-            unlocksHC = cheevo_info.get("UnlocksHardcoreCount")
-            total_players = cheevo_info.get("TotalPlayers")
-            percentage = round((unlocks / total_players) * 100, 2)
+            unlocks = cheevo_info.get("UnlocksCount") or 0
+            unlocksHC = cheevo_info.get("UnlocksHardcoreCount") or 0
+            total_players = cheevo_info.get("TotalPlayers") or 0
 
-            msg.append(
-                f"| {percentage}% unlock rate "
-                f"[{ASCII_BLU}{unlocks} ({unlocksHC}) of {total_players}\x03]"
-            )
+            # Every achievement is published with no players at all
+            if total_players:
+                percentage = round((unlocks / total_players) * 100, 2)
+                msg.append(
+                    f"| {percentage}% unlock rate "
+                    f"[{ASCII_BLU}{unlocks} ({unlocksHC}) of {total_players}\x03]"
+                )
+            else:
+                msg.append(f"| {ASCII_BLU}no players yet\x03")
             self.bot.privmsg(target, "{}".format(" ".join(msg)))
         else:
             self.bot.privmsg(target, "Cheevo Not found...")

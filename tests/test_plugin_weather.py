@@ -258,6 +258,14 @@ class IsNightTest(unittest.TestCase):
         assert _is_night(datetime(2026, 8, 8, 2, 0), astro)
         assert not _is_night(datetime(2026, 8, 8, 12, 0), astro)
 
+    def test_an_identical_sunrise_and_sunset_falls_back_too(self):
+        """What wttr.in actually returns for Longyearbyen, Alert, Vostok."""
+        astro = {"sunrise": "12:00 AM", "sunset": "12:00 AM"}
+        assert _is_night(datetime(2026, 12, 21, 2, 0), astro)
+        assert _is_night(datetime(2026, 12, 21, 22, 0), astro)
+        assert not _is_night(datetime(2026, 12, 21, 12, 0), astro)
+        assert not _is_night(datetime(2026, 6, 21, 12, 0), astro)
+
     def test_a_sunset_after_midnight_belongs_to_the_next_day(self):
         """Reykjavik in June: otherwise it would be night around the clock."""
         astro = {"sunrise": "02:55 AM", "sunset": "12:04 AM"}
